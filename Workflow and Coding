@@ -180,7 +180,7 @@ LIMIT 10;
 ซึ่งเป็นอัลกอริทึ่มที่ใช้ในการหากลุ่มของโหนดที่ใหญ่ที่สุดที่เชื่อมต่อกันภายในเครือข่ายของกราฟที่มีทิศทาง โดยกลุ่มของโหนดจะถูกพิจารณาว่าเป็น Strongly Connected Components ก็ต่อเมื่อกลุ่มของโหนดนั้น
 มีเส้นทางระหว่างแต่ละคู่ของโหนดภายในกลุ่ม ซึ่งการตรวจจับคอมมูนิตี้รูปแบบนี้มักจะใช้ในการช่วยหาโครงสร้างของเครือข่าย
 ---------------
-Strongly Connected Components 
+CALL gds.alpha.scc.write({
   nodeProjection: 'Station',
   relationshipProjection: 'TRAVEL_TO',
   writeProperty: 'componentId'
