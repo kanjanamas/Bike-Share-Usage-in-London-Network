@@ -1,0 +1,193 @@
+ขั้นตอนการดำเนินงาน 
+
++ เริ่มต้นเราจะโหลดข้อมูลไฟล์ csv มาก่อนทั้ง 3 ไฟล์ และทำการนับจำนวน row
+----------------
+LOAD CSV FROM 'file:///london_stations.csv' AS row
+RETURN count(row);
+---------------
+LOAD CSV FROM 'file:///rental.csv' AS row
+RETURN count(row);
+---------------
+LOAD CSV FROM 'file:///bike.csv' AS row
+RETURN count(row);
+---------------
+
+
+
++ เนื่องจากเหมือนว่าเมื่อนำข้อมูลเข้าโปรแกรมแล้ว ข้อมูลจะมี datatype เป็น string เราจึงเปลี่ยน datatype ของบางคอลัมน์ให้เหมาะสม
+---------------
+LOAD CSV FROM 'file:///london_stations.csv' AS row
+WITH toInteger(row[0]) AS station_id, row[1] AS station_name, toFloat(row[2]) AS longitude , toFloat(row[3]) AS latitude
+WHERE station_id > 0
+RETURN station_id , station_name , longitude , latitude
+LIMIT 3;
+---------------
+LOAD CSV FROM 'file:///rental.csv' AS row
+WITH toInteger(row[0]) AS rental_id, toFloat(row[1]) AS duration, toInteger(row[2]) AS bike_id , row[3] AS end_rental_date_time , toInteger(row[4]) AS end_station_id  , row[5] AS start_rental_date_time, toInteger(row[6]) AS start_station_id 
+RETURN rental_id, duration, bike_id, end_rental_date_time, end_station_id, start_rental_date_time, start_station_id
+LIMIT 3;
+---------------
+LOAD CSV FROM 'file:///bike.csv' AS row
+WITH toInteger(row[0]) AS bike_id
+RETURN bike_id 
+LIMIT 3;
+---------------
+
+
+
++ ต่อไปเราจะสร้างโหนด โดยให้มีทั้งหมด 3 โหนด คือ Station , Rental และ Bike 
+1. Station เป็นโหนดของสถานที่ให้เช่า-คืนจักรยาน ซึ่งจะใช้โหนดนี้เป็นทั้งจุดยืมและจุดคืนจักรยาน คุณสมบัติของโหนดประกอบด้วย ไอดี เพื่อใช้ระบุแต่ละสถานีไม่ให้ซ้ำกัน ชื่อสถานีเป็นภาษาอังกฤษ 
+และพิกัดทางภูมิศาสตร์ละติจูดและลองจิจูด 
+2. Rental จากข้อมูลดิบที่ได้มาตารางนี้เก็บข้อมูลแบบ transaction ทำให้มีข้อมูลเยอะมาก จึงขอเลือกมาใช้ทั้งหมด 15,000 เรคอร์ด โดยข้อมูลประกอบด้วย ไอดีประจำแต่ละการเช่าเพื่อแสดงความไม่ซ้ำกัน 
+ระยะเวลาที่ใช้ต่อการยืม 1 ครั้งหน่วยเป็นวินาที ไอดีจักรยานที่ใช้ วันที่และเวลาเช่าและคืน ณ จุดต่างๆ และไอดีของสถานที่เช่า-คืนจักรยาน 
+3. Bike มีเพียงข้อมูลไอดีของจักรยานแต่ละคัน
+
++ สร้าง Station
+---------------
+LOAD CSV FROM 'file:///london_stations.csv' AS row
+CREATE (:Station { Station_id: row[0], Station_name: row[1],Longitude:row[2],Latitude:row[3]})
+---------------
+
++ สร้าง Rental
+---------------
+LOAD CSV FROM 'file:///rental.csv' AS row
+CREATE (:Rental { rental_id: row[0]})
+---------------
+
++ สร้าง Bike
+---------------
+LOAD CSV FROM 'file:///bike.csv' AS row
+CREATE (:Bike { bike_id: row[0]})
+---------------
+
+
+
++ จากนั้นเราก็จะสร้างความสัมพันธ์ระหว่างโหนด โดยที่เราจะมีทั้งหมด 3 ความสัมพันธ์ 
+1. TRAVEL_TO เป็นความสัมพันธที่เกิดขึ้นระหว่างโหนด Station โดยมองเป็นจุดเริ่มต้นหรือจุดที่เช่า และจุดสิ้นสุดหรือจุดคืนจักรยาน ซึ่งเรามีข้อมูลคอลัมน์ที่ชื่อว่า duration เก็บข้อมูลระยะเวลาการใช้จักรยานใน 1 การเช่า-คืน 
+จึงใช้ข้อมูลตรงนี้เป็นน้ำหนักของความสัมพันธ์ โดยจะเป็นความสัมพันธ์แบบมีทิศทาง เริ่มจากจุดเริ่มต้นชี้ไปยังจุดสิ้นสุด
+2. START จะให้เป็นความสัมพันธ์ระหว่างโหนด Rental และ Station เป็นความสัมพันธ์แสดงว่าแต่ละการเช่า-คืนจักรยานเริ่มต้นที่สถานีใด โดยเป็นความสัมพันธ์แบบมีทิศทางที่ชี้จาก Rental ไป Station ที่เป็นจุดเริ่มต้น
+3. RENT คือความสัมพันธ์ระหว่างโหนด Rental และ Bike เป็นความสัมพันธ์ที่แสดงว่าในแต่ละการเช่า-คืนจักรยาน จักรยานคันใดถูกใช้งานไป โดยเป็นความสัมพันธ์แบบมีทิศทางจากโหนด Rental ชี้ไป Bike
+
++ สร้าง TRAVEL_TO 
+---------------
+LOAD CSV WITH HEADERS FROM 'file:///rental.csv' AS row
+MERGE (start:Station {station_id: row.start_station_id})   
+MERGE (end:Station {station_id: row.end_station_id})
+CREATE (start)-[r:TRAVEL_TO]->(end)
+SET r.weight = row.duration;
+---------------
+
++ สร้าง START
+---------------
+LOAD CSV WITH HEADERS FROM 'file:///rental.csv' AS row
+MERGE (s:Station {station_id: row.start_station_id})   
+MERGE (r:Rental {rental_id: row.rental_id})
+CREATE (r)-[:START]->(s);
+---------------
+
++ สร้าง RENT
+---------------
+LOAD CSV WITH HEADERS FROM 'file:///rental.csv' AS row
+MERGE (b:Bike {bike_id: row.bike_id})   
+MERGE (r:Rental {rental_id: row.rental_id})
+CREATE (r)-[:RENT]->(b);
+---------------
+
+
++ เมื่อเรามีทั้งโหนดและความสัมพันธ์แล้ว ทีนี้เราก็จะสามารถสืบค้นข้อมูลและหาค่าความเป็นศูนย์กลางต่างๆได้ อย่างแรกเราจะลองใช้คำสั่ง cypher ในการสืบค้นเพื่อหาว่าสถานีคู่ใดมีการเดินทางมากที่สุด
+---------------
+MATCH (e:Station)<-[r:TRAVEL_TO]-(sub)
+RETURN e.station_id AS start_station, sub.station_id AS end_station , count(DISTINCT r) AS amount
+ORDER BY amount DESC
+LIMIT 10;
+---------------
+
++ หรือเราจะลองสืบค้นว่าจักรยานคันใดถูกใช้งานมากที่สุด
+---------------
+MATCH (b:Bike)<-[r:RENT]-(e:Rental)
+RETURN b.bike_id AS Bike, count(size((b)<-[r:RENT]-(e))) AS Total_usage
+ORDER BY Total_usage DESC
+;
+---------------
+
+
+
++ ในตอนต่อไปเราจะใช้การวิเคราะห์เครือข่ายสังคม เพื่อวิเคราะห์เครือข่ายสถานีการเช่า-คืนจักรยาน โดยจะวัดค่าความเป็นศูนย์กลาง (Centrality) เพื่อหาสถานีที่สำคัญของเครือข่ายนี้ 
+คำว่าสำคัญในที่นี้อาจหมายถึงสถานีที่มีผู้คนเข้ามาใช้บริการเยอะที่สุด โดยการวัดค่าความเป็นศูนย์กลางสามารถคำนวณได้จากหลายรูปแบบ แต่ในบทความนี้เราจะคำนวณจากค่า Degree, Betweenness, 
+Closeness และ Pagerank
+
++ Degree Centrality หมายถึง การวัดค่าความเป็นศูนย์กลางจากจำนวนเส้นความสัมพันธ์ที่เชื่อมต่อกับโหนด โดยโหนดที่เราสนใจคือ Station เราต้องการค้นหาสถานีที่เป็นศูนย์กลางของเครือข่ายนี้ 
+ซึ่งความสัมพันธ์ระหว่างแต่ละสถานีคือ TRAVEL_TO เป็นความสัมพันธ์ที่เชื่อมระหว่างสถานีเริ่มต้นและสถานีสิ้นสุด เราจะนับเส้นความสัมพันธ์นี้ ว่าสถานีใดมีเส้นความสัมพันธ์มากที่สุด แต่เนื่องจากความสัมพันธ์ของเรา
+เป็นความสัมพันธ์ที่มีทิศทางจากสถานีเริ่มต้นไปยังสถานีสิ้นสุด ดังนั้นเราจึงหาค่า degree แยกเป็นสองประเภท คือ In Degree และ Out Degree โดยที่ In Degree คือจำนวนเส้นเชื่อมที่วิ่งเข้าหาสถานีสิ้นสุด 
+และ Out Degree คือจำนวนเส้นเชื่อมที่วิ่งออกจากสถานีเริ่มต้น 
+
++ IN Degree
+---------------
+MATCH (e:Station)<-[r:TRAVEL_TO]-()
+RETURN e.station_id AS start_station, count(size((e)<-[r:TRAVEL_TO]-())) AS IN_DEGREE
+ORDER BY IN_DEGREE  DESC
+;
+--------------
+
++ OUT Degree 
+---------------
+MATCH ()<-[r:TRAVEL_TO]-(e:Station)
+RETURN e.station_id AS end_station, count(size(()<-[r:TRAVEL_TO]-(e))) AS OUT_DEGREE
+ORDER BY OUT_DEGREE  DESC
+;
+---------------
+
+
++ Betweenness Centrality หมายถึง การวัดค่าความเป็นศูนย์กลางโดยวัดจากการคำนวณ Shortest path ของแต่ละโหนดและคำนวณว่ามีการเดินทางผ่านจุดๆหนึ่งมากเท่าใด โดยโหนดในที่นี้ที่เราสนใจคือ Station 
+แต่เนื่องจากข้อมูลที่ได้มาเป็นเก็บข้อมูลเพียงจุดเริ่มต้นและจุดสิ้นสุด ไม่ได้เก็บเป็นเส้นทางว่าผ่านจุดใดบ้าง ทำให้ทุกๆการเดินทางเป็นการเดินทางที่ไม่ได้ผ่านจุดอื่นเลย
+
++ ก่อนอื่นเราจะสร้างกราฟที่ชื่อว่า StationGraph เป็นกราฟที่สนใจความสัมพันธ์ระหว่างโหนด Station ตรงนี้จำเป็นจะต้องติดตั้ง plugin Graph Data Science Library ก่อน 
+---------------
+CALL gds.graph.create('StationGraph','Station','TRAVEL_TO')
+YIELD graphName , nodeCount , relationshipCount ,createMillis;
+---------------
+
++ หาค่า Betweenness Centrality
+---------------
+CALL gds.betweenness.stream('StationGraph')
+YIELD nodeId , score
+RETURN nodeId AS station , score AS score_of_Betweenness
+ORDER BY score DESC
+LIMIT 10;
+--------------
+
+
++ Closeness Centrality หมายถึง การวัดค่าความเป็นศูนย์กลางจากค่าความใกล้ชิดระหว่างโหนด ซึ่งโหนดที่เราจะใช้ก็คือโหนด Station และความสัมพันธ์ TRAVEL_TO
+---------------
+CALL gds.alpha.closeness.stream('StationGraph')
+YIELD nodeId, centrality
+RETURN nodeId AS station , centrality AS score_of_Clossness
+ORDER BY centrality DESC
+LIMIT 10;
+---------------
+
++ PageRank หมายถึง การวัดค่าความเป็นศูนย์กลางจากการให้คะแนนที่ In Degree โดยโหนดที่เราใช้ในการคำนวณคือ Station และความสัมพันธ์ TRAVEL_TO 
+--------------
+CALL gds.pageRank.stream('StationGraph')
+YIELD nodeId , score 
+RETURN nodeId AS station , score AS score_of_PageRank
+ORDER BY score DESC
+LIMIT 10;
+--------------
+
+
++ นอกจากสามารถหาจุดศูนย์กลางของเครือข่ายได้แล้ว ยังสามารถใช้โปรแกรม Neo4j ในการตรวจจับคอมมูนิตี้ได้อีกด้วย เราจะลองใช้อัลกอริทึ่มที่ชื่อว่า Strongly Connected Components 
+ซึ่งเป็นอัลกอริทึ่มที่ใช้ในการหากลุ่มของโหนดที่ใหญ่ที่สุดที่เชื่อมต่อกันภายในเครือข่ายของกราฟที่มีทิศทาง โดยกลุ่มของโหนดจะถูกพิจารณาว่าเป็น Strongly Connected Components ก็ต่อเมื่อกลุ่มของโหนดนั้น
+มีเส้นทางระหว่างแต่ละคู่ของโหนดภายในกลุ่ม ซึ่งการตรวจจับคอมมูนิตี้รูปแบบนี้มักจะใช้ในการช่วยหาโครงสร้างของเครือข่าย
+---------------
+Strongly Connected Components 
+  nodeProjection: 'Station',
+  relationshipProjection: 'TRAVEL_TO',
+  writeProperty: 'componentId'
+})
+YIELD setCount, maxSetSize, minSetSize;
+---------------
+
+
+
+
